@@ -85,9 +85,25 @@ Q1,Q2,...,Q15,Otwarte_1,Otwarte_2,Otwarte_3
 
 ### 5. Uruchom skrypt
 
+Masz dwie opcje: CLI lub interfejs przeglądarkowy.
+
+**CLI:**
+
 ```bash
 python generuj_raport.py dane.csv
 ```
+
+**Interfejs przeglądarkowy (Flask):**
+
+```bash
+python app.py
+```
+
+Następnie otwórz w przeglądarce: <http://127.0.0.1:5000>
+
+Wgraj plik CSV przez formularz, a po zakończeniu zobaczysz stronę
+z linkami do pobrania PDF i PNG-ów oraz podglądem wykresów.
+Cała inference odbywa się lokalnie — przeglądarka łączy się tylko z `127.0.0.1`.
 
 Co się dzieje:
 
@@ -163,6 +179,8 @@ Jeśli masz GPU z CUDA, `torch` to wykorzysta automatycznie.
 
 | Plik | Opis |
 |------|------|
-| `generuj_raport.py` | Główny skrypt generujący raport |
+| `generuj_raport.py` | Główny skrypt generujący raport (CLI + funkcja `generuj()`) |
+| `app.py` | Aplikacja Flask z formularzem uploadu CSV |
+| `templates/` | Szablony HTML dla interfejsu przeglądarkowego |
 | `requirements.txt` | Zależności Pythona |
 | `.gitignore` | Pomija `raport/`, cache i venv |

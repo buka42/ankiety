@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <title>Raport wygenerowany</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2.5rem auto; padding: 0 1rem; color: #222; }
+        h1 { margin-bottom: 0.3rem; }
+        .ok { background: #e8f7e8; border: 1px solid #4a4; color: #060; padding: 0.8rem 1rem; border-radius: 6px; margin-bottom: 1.5rem; }
+        ul { line-height: 1.8; }
+        a { color: #2a6cdf; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .podglad { margin-top: 1.5rem; }
+        .podglad img { max-width: 100%; border: 1px solid #ccc; border-radius: 6px; margin-bottom: 1rem; }
+        .powrot { display: inline-block; margin-top: 1.5rem; }
+    </style>
+</head>
+<body>
+    <h1>Raport wygenerowany</h1>
+    <div class="ok">Pliki zapisane w folderze <code>raport/</code>.</div>
+
+    <h2>Pobierz</h2>
+    <ul>
+        {% for nazwa, plik in pliki.items() %}
+            <li><a href="{{ url_for('pobierz', nazwa=plik) }}">{{ nazwa }}</a> &mdash; <code>{{ plik }}</code></li>
+        {% endfor %}
+    </ul>
+
+    <div class="podglad">
+        <h2>Podgląd</h2>
+        {% if pliki.histogramy %}<img src="{{ url_for('pobierz', nazwa=pliki.histogramy) }}" alt="histogramy">{% endif %}
+        {% if pliki.korelacja %}<img src="{{ url_for('pobierz', nazwa=pliki.korelacja) }}" alt="korelacja">{% endif %}
+        {% if pliki.sentyment %}<img src="{{ url_for('pobierz', nazwa=pliki.sentyment) }}" alt="sentyment">{% endif %}
+    </div>
+
+    <a class="powrot" href="{{ url_for('index') }}">&larr; Wgraj kolejny plik</a>
+</body>
+</html>

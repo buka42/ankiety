@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pl">
+<head>
+    <meta charset="utf-8">
+    <title>Generator raportu z ankiety</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2.5rem auto; padding: 0 1rem; color: #222; }
+        h1 { margin-bottom: 0.3rem; }
+        .opis { color: #555; margin-bottom: 1.5rem; }
+        form { border: 1px solid #ddd; padding: 1.5rem; border-radius: 8px; background: #fafafa; }
+        label { display: block; font-weight: 600; margin-bottom: 0.5rem; }
+        input[type=file] { margin-bottom: 1rem; }
+        button { background: #2a6cdf; color: white; border: 0; padding: 0.7rem 1.4rem; border-radius: 6px; font-size: 1rem; cursor: pointer; }
+        button:hover { background: #1f56b5; }
+        .blad { background: #ffe8e8; border: 1px solid #d44; color: #900; padding: 0.8rem 1rem; border-radius: 6px; margin-bottom: 1rem; }
+        .info { color: #666; font-size: 0.9rem; margin-top: 1rem; }
+        code { background: #eee; padding: 0.1rem 0.3rem; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>Generator raportu z ankiety</h1>
+    <p class="opis">Wczytaj plik CSV z wynikami (15 pytań liczbowych 1-5 + 3 otwarte).
+    Raport powstaje lokalnie, bez wysyłania danych na zewnątrz.</p>
+
+    {% if blad %}<div class="blad">{{ blad }}</div>{% endif %}
+
+    <form method="post" action="{{ url_for('generuj') }}" enctype="multipart/form-data">
+        <label for="csv">Plik CSV:</label>
+        <input id="csv" type="file" name="csv" accept=".csv" required>
+        <br>
+        <button type="submit">Wygeneruj raport</button>
+    </form>
+
+    <p class="info">
+        Model sentymentu PL: <code>{{ model_pl }}</code><br>
+        Pierwsze uruchomienie pobiera wagi modelu z HuggingFace (~1 GB).
+        Kolejne działają offline.
+    </p>
+</body>
+</html>

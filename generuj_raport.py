@@ -272,6 +272,45 @@ def zlozenie_pdf(
             tabela_pdf(pdf, podsumowanie, "Sentyment — liczba odpowiedzi wg kategorii")
 
 
+def generuj(plik: Path, out_dir: Path = OUT_DIR) -> dict[str, Path]:
+    df = pd.read_csv(plik)
+    kol_num, kol_otw = wykryj_kolumny(df)
+    print(f"Wczytano {len(df)} respondentów.")
+    print(f"Pytania liczbowe ({len(kol_num)}): {kol_num}")
+    print(f"Pytania otwarte ({len(kol_otw)}): {kol_otw}")
+
+    out_dir.mkdir(exist_ok=True)
+    png_hist = out_dir / f"{BASENAME}-histogramy.png"
+    png_corr = out_dir / f"{BASENAME}-korelacja.png"
+    png_sent = out_dir / f"{BASENAME}-sentyment.png"
+    sciezka_pdf = out_dir / f"{BASENAME}.pdf"
+    sciezka_stats = out_dir / f"{BASENAME}-statystyki.csv"
+
+    stats = statystyki(df, kol_num)
+    stats.to_csv(sciezka_stats, encoding="utf-8")
+    histogramy(df, kol_num, png_hist)
+    _, corr = macierz_korelacji(df, kol_num, png_corr)
+
+    sentyment = analiza_sentymentu(df, kol_otw) if kol_otw else {}
+    png_sent_final: Path | None = None
+    if sentyment:
+        wykres_sentymentu(sentyment, png_sent)
+        png_sent_final = png_sent
+
+    zlozenie_pdf(
+        sciezka_pdf, df, kol_num, kol_otw, stats, corr, png_hist, png_corr, png_sent_final, sentyment
+    )
+    wynik = {
+        "pdf": sciezka_pdf,
+        "histogramy": png_hist,
+        "korelacja": png_corr,
+        "statystyki": sciezka_stats,
+    }
+    if png_sent_final is not None:
+        wynik["sentyment"] = png_sent_final
+    return wynik
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print("Użycie: python generuj_raport.py <plik.csv>", file=sys.stderr)
@@ -280,39 +319,9 @@ def main() -> int:
     if not plik.exists():
         print(f"Plik nie istnieje: {plik}", file=sys.stderr)
         return 1
-
-    df = pd.read_csv(plik)
-    kol_num, kol_otw = wykryj_kolumny(df)
-    print(f"Wczytano {len(df)} respondentów.")
-    print(f"Pytania liczbowe ({len(kol_num)}): {kol_num}")
-    print(f"Pytania otwarte ({len(kol_otw)}): {kol_otw}")
-
-    OUT_DIR.mkdir(exist_ok=True)
-    png_hist = OUT_DIR / f"{BASENAME}-histogramy.png"
-    png_corr = OUT_DIR / f"{BASENAME}-korelacja.png"
-    png_sent = OUT_DIR / f"{BASENAME}-sentyment.png"
-    sciezka_pdf = OUT_DIR / f"{BASENAME}.pdf"
-    sciezka_stats = OUT_DIR / f"{BASENAME}-statystyki.csv"
-
-    stats = statystyki(df, kol_num)
-    stats.to_csv(sciezka_stats, encoding="utf-8")
-    print(f"Zapisano: {sciezka_stats}")
-
-    histogramy(df, kol_num, png_hist)
-    print(f"Zapisano: {png_hist}")
-
-    _, corr = macierz_korelacji(df, kol_num, png_corr)
-    print(f"Zapisano: {png_corr}")
-
-    sentyment = analiza_sentymentu(df, kol_otw) if kol_otw else {}
-    png_sent_final: Path | None = None
-    if sentyment:
-        wykres_sentymentu(sentyment, png_sent)
-        png_sent_final = png_sent
-        print(f"Zapisano: {png_sent}")
-
-    zlozenie_pdf(sciezka_pdf, df, kol_num, kol_otw, stats, corr, png_hist, png_corr, png_sent_final, sentyment)
-    print(f"Zapisano: {sciezka_pdf}")
+    wynik = generuj(plik)
+    for nazwa, sciezka in wynik.items():
+        print(f"Zapisano ({nazwa}): {sciezka}")
     return 0
 
 
