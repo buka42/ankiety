@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+"""Generator raportu z ankiety o stresie studentów.
+
+Użycie:
+    python generuj_raport.py dane.csv
+
+Plik CSV powinien zawierać 15 kolumn liczbowych (skala 1-5) i 3 kolumny
+z odpowiedziami otwartymi. Pierwszy wiersz to nagłówki. Nazwy kolumn
+otwartych powinny zaczynać się od "Otwarte" lub zawierać słowo "tekst"
+(można też wymusić listami NUMERIC_COLS / OPEN_COLS w pliku konfig.).
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from datetime import date
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from matplotlib.backends.backend_pdf import PdfPages
+from textblob import TextBlob
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+OUT_DIR = Path("raport")
+TODAY = date.today().isoformat()
+BASENAME = f"ankieta-{TODAY}"
+
+
+def wykryj_kolumny(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    numeryczne, otwarte = [], []
+    for col in df.columns:
+        seria = pd.to_numeric(df[col], errors="coerce")
+        if seria.notna().sum() >= max(10, 0.5 * len(df)):
+            numeryczne.append(col)
+        else:
+            otwarte.append(col)
+    return numeryczne, otwarte
+
+
+def statystyki(df: pd.DataFrame, kolumny: list[str]) -> pd.DataFrame:
+    dane = df[kolumny].apply(pd.to_numeric, errors="coerce")
+    return pd.DataFrame(
+        {
+            "średnia": dane.mean().round(3),
+            "mediana": dane.median(),
+            "odch. std.": dane.std().round(3),
+            "min": dane.min(),
+            "max": dane.max(),
+            "n": dane.count(),
+        }
+    )
+
+
+def histogramy(df: pd.DataFrame, kolumny: list[str], sciezka: Path) -> Path:
+    n = len(kolumny)
+    cols = 3
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4.2, rows * 3.0))
+    axes = np.array(axes).reshape(-1)
+    bins = np.arange(0.5, 6.5, 1)
+    for ax, kol in zip(axes, kolumny):
+        seria = pd.to_numeric(df[kol], errors="coerce").dropna()
+        ax.hist(seria, bins=bins, edgecolor="black", color="#4C72B0")
+        ax.set_title(kol, fontsize=9)
+        ax.set_xticks(range(1, 6))
+        ax.set_xlabel("ocena")
+        ax.set_ylabel("liczba")
+    for ax in axes[n:]:
+        ax.axis("off")
+    fig.suptitle("Histogramy odpowiedzi (skala 1-5)", fontsize=14)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.savefig(sciezka, dpi=150)
+    plt.close(fig)
+    return sciezka
+
+
+def macierz_korelacji(df: pd.DataFrame, kolumny: list[str], sciezka: Path) -> tuple[Path, pd.DataFrame]:
+    dane = df[kolumny].apply(pd.to_numeric, errors="coerce")
+    corr = dane.corr()
+    fig, ax = plt.subplots(figsize=(max(8, 0.6 * len(kolumny)), max(7, 0.6 * len(kolumny))))
+    sns.heatmap(
+        corr,
+        annot=True,
+        fmt=".2f",
+        cmap="RdBu_r",
+        center=0,
+        vmin=-1,
+        vmax=1,
+        square=True,
+        cbar_kws={"shrink": 0.8},
+        ax=ax,
+        annot_kws={"size": 7},
+    )
+    ax.set_title("Macierz korelacji (Pearson)")
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    fig.tight_layout()
+    fig.savefig(sciezka, dpi=150)
+    plt.close(fig)
+    return sciezka, corr
+
+
+def analiza_sentymentu(df: pd.DataFrame, kolumny: list[str]) -> dict[str, pd.DataFrame]:
+    vader = SentimentIntensityAnalyzer()
+    wyniki = {}
+    for kol in kolumny:
+        rekordy = []
+        for tekst in df[kol].fillna("").astype(str):
+            tekst = tekst.strip()
+            if not tekst:
+                rekordy.append({"vader": np.nan, "textblob": np.nan, "etykieta": "brak"})
+                continue
+            v = vader.polarity_scores(tekst)["compound"]
+            tb = TextBlob(tekst).sentiment.polarity
+            srednia = (v + tb) / 2
+            if srednia >= 0.15:
+                etykieta = "pozytywny"
+            elif srednia <= -0.15:
+                etykieta = "negatywny"
+            else:
+                etykieta = "neutralny"
+            rekordy.append({"vader": v, "textblob": tb, "etykieta": etykieta})
+        wyniki[kol] = pd.DataFrame(rekordy)
+    return wyniki
+
+
+def wykres_sentymentu(sentyment: dict[str, pd.DataFrame], sciezka: Path) -> Path:
+    etykiety = ["pozytywny", "neutralny", "negatywny", "brak"]
+    kolory = {"pozytywny": "#55A868", "neutralny": "#C5C5C5", "negatywny": "#C44E52", "brak": "#999999"}
+    dane = {kol: df["etykieta"].value_counts().reindex(etykiety, fill_value=0) for kol, df in sentyment.items()}
+    fig, ax = plt.subplots(figsize=(max(6, 2 * len(dane)), 5))
+    x = np.arange(len(dane))
+    szer = 0.2
+    for i, et in enumerate(etykiety):
+        wartosci = [dane[k][et] for k in dane]
+        ax.bar(x + (i - 1.5) * szer, wartosci, szer, label=et, color=kolory[et])
+    ax.set_xticks(x)
+    ax.set_xticklabels(list(dane.keys()), rotation=15, ha="right")
+    ax.set_ylabel("liczba odpowiedzi")
+    ax.set_title("Sentyment odpowiedzi otwartych (VADER + TextBlob)")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(sciezka, dpi=150)
+    plt.close(fig)
+    return sciezka
+
+
+def strona_tytulowa(pdf: PdfPages, df: pd.DataFrame, kol_num: list[str], kol_otw: list[str]) -> None:
+    fig, ax = plt.subplots(figsize=(8.27, 11.69))
+    ax.axis("off")
+    tekst = [
+        "Raport z ankiety: stres studentów",
+        f"Data wygenerowania: {TODAY}",
+        "",
+        f"Liczba respondentów: {len(df)}",
+        f"Pytania liczbowe (skala 1-5): {len(kol_num)}",
+        f"Pytania otwarte: {len(kol_otw)}",
+        "",
+        "Zawartość raportu:",
+        "  1. Statystyki opisowe (średnia, mediana, odch. std.)",
+        "  2. Histogramy odpowiedzi liczbowych",
+        "  3. Macierz korelacji Pearsona",
+        "  4. Analiza sentymentu odpowiedzi otwartych (VADER + TextBlob)",
+    ]
+    ax.text(0.08, 0.92, "\n".join(tekst), va="top", ha="left", fontsize=12, family="monospace")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def tabela_pdf(pdf: PdfPages, tabela: pd.DataFrame, tytul: str) -> None:
+    fig, ax = plt.subplots(figsize=(11.69, 8.27))
+    ax.axis("off")
+    ax.set_title(tytul, fontsize=14, pad=12)
+    t = ax.table(
+        cellText=tabela.round(3).astype(str).values,
+        rowLabels=tabela.index,
+        colLabels=tabela.columns,
+        loc="center",
+        cellLoc="center",
+    )
+    t.auto_set_font_size(False)
+    t.set_fontsize(8)
+    t.scale(1, 1.3)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def zlozenie_pdf(
+    sciezka_pdf: Path,
+    df: pd.DataFrame,
+    kol_num: list[str],
+    kol_otw: list[str],
+    stats: pd.DataFrame,
+    corr: pd.DataFrame,
+    png_hist: Path,
+    png_corr: Path,
+    png_sent: Path | None,
+    sentyment: dict[str, pd.DataFrame],
+) -> None:
+    with PdfPages(sciezka_pdf) as pdf:
+        strona_tytulowa(pdf, df, kol_num, kol_otw)
+        tabela_pdf(pdf, stats, "Statystyki opisowe — pytania liczbowe")
+        for png in [png_hist, png_corr]:
+            fig = plt.figure(figsize=(11.69, 8.27))
+            img = plt.imread(png)
+            plt.imshow(img)
+            plt.axis("off")
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
+        tabela_pdf(pdf, corr, "Macierz korelacji (Pearson)")
+        if png_sent is not None:
+            fig = plt.figure(figsize=(11.69, 8.27))
+            img = plt.imread(png_sent)
+            plt.imshow(img)
+            plt.axis("off")
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
+            podsumowanie = pd.DataFrame(
+                {kol: df["etykieta"].value_counts() for kol, df in sentyment.items()}
+            ).fillna(0).astype(int)
+            tabela_pdf(pdf, podsumowanie, "Sentyment — liczba odpowiedzi wg kategorii")
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("Użycie: python generuj_raport.py <plik.csv>", file=sys.stderr)
+        return 1
+    plik = Path(sys.argv[1])
+    if not plik.exists():
+        print(f"Plik nie istnieje: {plik}", file=sys.stderr)
+        return 1
+
+    df = pd.read_csv(plik)
+    kol_num, kol_otw = wykryj_kolumny(df)
+    print(f"Wczytano {len(df)} respondentów.")
+    print(f"Pytania liczbowe ({len(kol_num)}): {kol_num}")
+    print(f"Pytania otwarte ({len(kol_otw)}): {kol_otw}")
+
+    OUT_DIR.mkdir(exist_ok=True)
+    png_hist = OUT_DIR / f"{BASENAME}-histogramy.png"
+    png_corr = OUT_DIR / f"{BASENAME}-korelacja.png"
+    png_sent = OUT_DIR / f"{BASENAME}-sentyment.png"
+    sciezka_pdf = OUT_DIR / f"{BASENAME}.pdf"
+    sciezka_stats = OUT_DIR / f"{BASENAME}-statystyki.csv"
+
+    stats = statystyki(df, kol_num)
+    stats.to_csv(sciezka_stats, encoding="utf-8")
+    print(f"Zapisano: {sciezka_stats}")
+
+    histogramy(df, kol_num, png_hist)
+    print(f"Zapisano: {png_hist}")
+
+    _, corr = macierz_korelacji(df, kol_num, png_corr)
+    print(f"Zapisano: {png_corr}")
+
+    sentyment = analiza_sentymentu(df, kol_otw) if kol_otw else {}
+    png_sent_final: Path | None = None
+    if sentyment:
+        wykres_sentymentu(sentyment, png_sent)
+        png_sent_final = png_sent
+        print(f"Zapisano: {png_sent}")
+
+    zlozenie_pdf(sciezka_pdf, df, kol_num, kol_otw, stats, corr, png_hist, png_corr, png_sent_final, sentyment)
+    print(f"Zapisano: {sciezka_pdf}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
