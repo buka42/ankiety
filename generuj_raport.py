@@ -5,9 +5,18 @@ Użycie:
     python generuj_raport.py dane.csv
 
 Plik CSV powinien zawierać 15 kolumn liczbowych (skala 1-5) i 3 kolumny
-z odpowiedziami otwartymi. Pierwszy wiersz to nagłówki. Nazwy kolumn
-otwartych powinny zaczynać się od "Otwarte" lub zawierać słowo "tekst"
-(można też wymusić listami NUMERIC_COLS / OPEN_COLS w pliku konfig.).
+z odpowiedziami otwartymi. Pierwszy wiersz to nagłówki.
+
+Analiza sentymentu odpowiedzi otwartych uruchamia trzy modele lokalnie:
+  - VADER (angielski),
+  - TextBlob (angielski),
+  - wielojęzyczny model HuggingFace rozumiejący polski (domyślnie
+    cardiffnlp/twitter-xlm-roberta-base-sentiment, można zmienić zmienną
+    środowiskową POLISH_SENTIMENT_MODEL, np. na "Voicelab/HerBERT-Sentiment"
+    lub "nlptown/bert-base-multilingual-uncased-sentiment").
+
+Wagi modelu pobierane są przy pierwszym uruchomieniu i cache'owane lokalnie
+(domyślnie ~/.cache/huggingface). Inference działa lokalnie, bez API.
 """
 
 from __future__ import annotations
@@ -26,11 +35,13 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
 from textblob import TextBlob
+from transformers import pipeline
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 OUT_DIR = Path("raport")
 TODAY = date.today().isoformat()
 BASENAME = f"ankieta-{TODAY}"
+PL_MODEL = os.environ.get("POLISH_SENTIMENT_MODEL", "cardiffnlp/twitter-xlm-roberta-base-sentiment")
 
 
 def wykryj_kolumny(df: pd.DataFrame) -> tuple[list[str], list[str]]:
@@ -106,26 +117,59 @@ def macierz_korelacji(df: pd.DataFrame, kolumny: list[str], sciezka: Path) -> tu
     return sciezka, corr
 
 
+def _zaladuj_model_pl():
+    print(f"Ładowanie modelu PL: {PL_MODEL} (pierwsze uruchomienie pobiera wagi)...")
+    return pipeline("sentiment-analysis", model=PL_MODEL, tokenizer=PL_MODEL, truncation=True)
+
+
+def _normalizuj_etykiete_pl(etykieta: str, score: float) -> tuple[str, float]:
+    et = etykieta.lower()
+    if et in {"positive", "pozytywny", "pos", "label_2"}:
+        return "pozytywny", score
+    if et in {"negative", "negatywny", "neg", "label_0"}:
+        return "negatywny", -score
+    if et in {"neutral", "neutralny", "label_1"}:
+        return "neutralny", 0.0
+    if et.endswith(" stars") or et.endswith(" star"):
+        try:
+            gwiazdki = int(et.split()[0])
+        except ValueError:
+            return "neutralny", 0.0
+        skala = (gwiazdki - 3) / 2
+        if gwiazdki >= 4:
+            return "pozytywny", skala
+        if gwiazdki <= 2:
+            return "negatywny", skala
+        return "neutralny", 0.0
+    return "neutralny", 0.0
+
+
 def analiza_sentymentu(df: pd.DataFrame, kolumny: list[str]) -> dict[str, pd.DataFrame]:
     vader = SentimentIntensityAnalyzer()
+    pl = _zaladuj_model_pl()
     wyniki = {}
     for kol in kolumny:
         rekordy = []
         for tekst in df[kol].fillna("").astype(str):
             tekst = tekst.strip()
             if not tekst:
-                rekordy.append({"vader": np.nan, "textblob": np.nan, "etykieta": "brak"})
+                rekordy.append(
+                    {"vader": np.nan, "textblob": np.nan, "pl_model": np.nan, "etykieta": "brak"}
+                )
                 continue
             v = vader.polarity_scores(tekst)["compound"]
             tb = TextBlob(tekst).sentiment.polarity
-            srednia = (v + tb) / 2
-            if srednia >= 0.15:
-                etykieta = "pozytywny"
-            elif srednia <= -0.15:
-                etykieta = "negatywny"
-            else:
-                etykieta = "neutralny"
-            rekordy.append({"vader": v, "textblob": tb, "etykieta": etykieta})
+            wynik_pl = pl(tekst)[0]
+            etykieta_pl, score_pl = _normalizuj_etykiete_pl(wynik_pl["label"], wynik_pl["score"])
+            rekordy.append(
+                {
+                    "vader": v,
+                    "textblob": tb,
+                    "pl_model": score_pl,
+                    "etykieta_pl": etykieta_pl,
+                    "etykieta": etykieta_pl,
+                }
+            )
         wyniki[kol] = pd.DataFrame(rekordy)
     return wyniki
 
@@ -143,7 +187,7 @@ def wykres_sentymentu(sentyment: dict[str, pd.DataFrame], sciezka: Path) -> Path
     ax.set_xticks(x)
     ax.set_xticklabels(list(dane.keys()), rotation=15, ha="right")
     ax.set_ylabel("liczba odpowiedzi")
-    ax.set_title("Sentyment odpowiedzi otwartych (VADER + TextBlob)")
+    ax.set_title(f"Sentyment odpowiedzi otwartych — model PL ({PL_MODEL})")
     ax.legend()
     fig.tight_layout()
     fig.savefig(sciezka, dpi=150)
@@ -166,7 +210,8 @@ def strona_tytulowa(pdf: PdfPages, df: pd.DataFrame, kol_num: list[str], kol_otw
         "  1. Statystyki opisowe (średnia, mediana, odch. std.)",
         "  2. Histogramy odpowiedzi liczbowych",
         "  3. Macierz korelacji Pearsona",
-        "  4. Analiza sentymentu odpowiedzi otwartych (VADER + TextBlob)",
+        "  4. Analiza sentymentu odpowiedzi otwartych",
+        f"     (VADER + TextBlob + lokalny model PL: {PL_MODEL})",
     ]
     ax.text(0.08, 0.92, "\n".join(tekst), va="top", ha="left", fontsize=12, family="monospace")
     pdf.savefig(fig)
