@@ -119,7 +119,25 @@ def macierz_korelacji(df: pd.DataFrame, kolumny: list[str], sciezka: Path) -> tu
 
 def _zaladuj_model_pl():
     print(f"Ładowanie modelu PL: {PL_MODEL} (pierwsze uruchomienie pobiera wagi)...")
-    return pipeline("sentiment-analysis", model=PL_MODEL, tokenizer=PL_MODEL, truncation=True)
+    try:
+        return pipeline(
+            "sentiment-analysis", model=PL_MODEL, tokenizer=PL_MODEL, truncation=True, use_fast=True
+        )
+    except Exception as exc:
+        komunikat = str(exc)
+        if "sentencepiece" in komunikat.lower() or "Error parsing" in komunikat:
+            raise RuntimeError(
+                "Tokenizer modelu wymaga pakietu 'sentencepiece' albo plik w cache "
+                "HuggingFace jest uszkodzony. Spróbuj:\n"
+                "  1) pip install sentencepiece\n"
+                "  2) usuń cache modelu i pobierz ponownie:\n"
+                "     - Windows:  rmdir /S /Q %USERPROFILE%\\.cache\\huggingface\\hub\\"
+                "models--cardiffnlp--twitter-xlm-roberta-base-sentiment\n"
+                "     - Linux/macOS:  rm -rf ~/.cache/huggingface/hub/"
+                "models--cardiffnlp--twitter-xlm-roberta-base-sentiment\n"
+                f"Oryginalny błąd: {exc}"
+            ) from exc
+        raise
 
 
 def _normalizuj_etykiete_pl(etykieta: str, score: float) -> tuple[str, float]:

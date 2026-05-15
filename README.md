@@ -160,6 +160,26 @@ Inne sensowne opcje:
 Pierwsze uruchomienie wymaga internetu, żeby pobrać model. Po pobraniu
 wagi siedzą w `~/.cache/huggingface` i można pracować offline.
 
+**`Error parsing line b'\x0e' in ...sentencepiece.bpe.model`**
+Brakuje pakietu `sentencepiece` (potrzebnego dla tokenizerów XLM-RoBERTa)
+albo pobrany plik tokenizera jest uszkodzony. Najpierw zainstaluj pakiet:
+
+```bash
+pip install sentencepiece
+```
+
+Jeśli błąd dalej się powtarza, usuń uszkodzony cache i pozwól na ponowne
+pobranie:
+
+- Windows (PowerShell):
+  ```powershell
+  Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\huggingface\hub\models--cardiffnlp--twitter-xlm-roberta-base-sentiment"
+  ```
+- Linux/macOS:
+  ```bash
+  rm -rf ~/.cache/huggingface/hub/models--cardiffnlp--twitter-xlm-roberta-base-sentiment
+  ```
+
 **`ModuleNotFoundError: No module named 'pandas'`** (itd.)
 Środowisko wirtualne nie jest aktywne albo `pip install -r requirements.txt`
 nie został uruchomiony.
