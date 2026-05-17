@@ -7,4 +7,5 @@ textblob>=0.17
 transformers>=4.40
 torch>=2.1
 sentencepiece>=0.2
+protobuf>=4.21
 flask>=3.0

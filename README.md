@@ -10,6 +10,9 @@ Analiza sentymentu odpowiedzi otwartych działa **w pełni lokalnie**
 - **VADER** (angielski),
 - **TextBlob** (angielski),
 - **lokalny model HuggingFace** rozumiejący polski (domyślnie
+  `nlptown/bert-base-multilingual-uncased-sentiment` — wielojęzyczny BERT
+  używający WordPiece, dzięki czemu nie wymaga SentencePiece ani
+  konkretnej wersji protobuf; opcjonalnie można przełączyć na
   `cardiffnlp/twitter-xlm-roberta-base-sentiment`).
 
 Wynik trafia do folderu `raport/` jako `ankieta-RRRR-MM-DD.pdf`
@@ -139,18 +142,23 @@ Domyślny model można podmienić zmienną środowiskową
 `POLISH_SENTIMENT_MODEL`:
 
 ```bash
-# lżejszy, wielojęzyczny, zwraca 1-5 gwiazdek (~700 MB)
-POLISH_SENTIMENT_MODEL=nlptown/bert-base-multilingual-uncased-sentiment \
+# XLM-RoBERTa, etykiety positive/neutral/negative (~1 GB)
+POLISH_SENTIMENT_MODEL=cardiffnlp/twitter-xlm-roberta-base-sentiment \
     python generuj_raport.py dane.csv
 ```
 
 Inne sensowne opcje:
 
-- `cardiffnlp/twitter-xlm-roberta-base-sentiment` (domyślny, ~1 GB,
-  pozytywny/neutralny/negatywny),
-- `nlptown/bert-base-multilingual-uncased-sentiment` (1-5 gwiazdek,
-  automatycznie mapowane na pozytywny/neutralny/negatywny),
+- `nlptown/bert-base-multilingual-uncased-sentiment` (domyślny, ~700 MB,
+  1-5 gwiazdek automatycznie mapowane na pozytywny/neutralny/negatywny,
+  nie wymaga SentencePiece),
+- `cardiffnlp/twitter-xlm-roberta-base-sentiment` (~1 GB, wymaga
+  poprawnie zainstalowanego `sentencepiece` + `protobuf`),
 - dowolny model z HuggingFace Hub kompatybilny z `pipeline("sentiment-analysis")`.
+
+Jeśli wybrany model ma problem z tokenizerem, skrypt **automatycznie
+przełączy się** na model zapasowy (`nlptown/bert-base-multilingual-uncased-sentiment`)
+i kontynuuje pracę.
 
 ---
 
@@ -161,15 +169,33 @@ Pierwsze uruchomienie wymaga internetu, żeby pobrać model. Po pobraniu
 wagi siedzą w `~/.cache/huggingface` i można pracować offline.
 
 **`Error parsing line b'\x0e' in ...sentencepiece.bpe.model`**
-Brakuje pakietu `sentencepiece` (potrzebnego dla tokenizerów XLM-RoBERTa)
-albo pobrany plik tokenizera jest uszkodzony. Najpierw zainstaluj pakiet:
+To **nie** jest błąd `sentencepiece`, tylko **protobuf** próbujący sparsować
+binarny plik jako tekst. Występuje przy ładowaniu XLM-RoBERTa, gdy:
+wersja `protobuf` w środowisku jest niekompatybilna z transformers, albo
+pobrany plik tokenizera jest uszkodzony, albo brak `sentencepiece`.
+
+Najprostsze obejście — **przełącz się na domyślny BERT** (nie wymaga
+SentencePiece ani protobuf):
 
 ```bash
-pip install sentencepiece
+# CLI
+python generuj_raport.py dane.csv
+
+# Web UI
+python app.py
 ```
 
-Jeśli błąd dalej się powtarza, usuń uszkodzony cache i pozwól na ponowne
-pobranie:
+(od najnowszej wersji domyślnym modelem jest BERT-base-multilingual.
+Skrypt także sam fallbackuje na BERT, jeśli wybrany model padnie z tym
+błędem.)
+
+Jeśli chcesz mimo wszystko użyć XLM-RoBERTa:
+
+```bash
+pip install --upgrade sentencepiece protobuf transformers tokenizers
+```
+
+a następnie usuń cache modelu i pozwól pobrać go ponownie:
 
 - Windows (PowerShell):
   ```powershell

@@ -41,7 +41,8 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 OUT_DIR = Path("raport")
 TODAY = date.today().isoformat()
 BASENAME = f"ankieta-{TODAY}"
-PL_MODEL = os.environ.get("POLISH_SENTIMENT_MODEL", "cardiffnlp/twitter-xlm-roberta-base-sentiment")
+FALLBACK_MODEL = "nlptown/bert-base-multilingual-uncased-sentiment"
+PL_MODEL = os.environ.get("POLISH_SENTIMENT_MODEL", FALLBACK_MODEL)
 
 
 def wykryj_kolumny(df: pd.DataFrame) -> tuple[list[str], list[str]]:
@@ -117,24 +118,45 @@ def macierz_korelacji(df: pd.DataFrame, kolumny: list[str], sciezka: Path) -> tu
     return sciezka, corr
 
 
+def _sprobuj_zaladowac(model_id: str):
+    return pipeline(
+        "sentiment-analysis", model=model_id, tokenizer=model_id, truncation=True, use_fast=True
+    )
+
+
 def _zaladuj_model_pl():
     print(f"Ładowanie modelu PL: {PL_MODEL} (pierwsze uruchomienie pobiera wagi)...")
     try:
-        return pipeline(
-            "sentiment-analysis", model=PL_MODEL, tokenizer=PL_MODEL, truncation=True, use_fast=True
-        )
+        return _sprobuj_zaladowac(PL_MODEL)
     except Exception as exc:
         komunikat = str(exc)
-        if "sentencepiece" in komunikat.lower() or "Error parsing" in komunikat:
+        problem_z_tokenizerem = (
+            "sentencepiece" in komunikat.lower()
+            or "Error parsing" in komunikat
+            or "protobuf" in komunikat.lower()
+        )
+        if problem_z_tokenizerem and PL_MODEL != FALLBACK_MODEL:
+            print(
+                f"Model {PL_MODEL} ma problem z tokenizerem ({exc.__class__.__name__}: {exc}).\n"
+                f"Próbuję modelu zapasowego {FALLBACK_MODEL} (BERT/WordPiece, bez SentencePiece)..."
+            )
+            try:
+                return _sprobuj_zaladowac(FALLBACK_MODEL)
+            except Exception as exc2:
+                raise RuntimeError(
+                    f"Nie udało się załadować modelu {PL_MODEL} ani zapasowego "
+                    f"{FALLBACK_MODEL}.\nPierwotny błąd: {exc}\nBłąd fallbacku: {exc2}"
+                ) from exc2
+        if problem_z_tokenizerem:
             raise RuntimeError(
-                "Tokenizer modelu wymaga pakietu 'sentencepiece' albo plik w cache "
-                "HuggingFace jest uszkodzony. Spróbuj:\n"
-                "  1) pip install sentencepiece\n"
+                "Tokenizer modelu nie wczytał się poprawnie. Spróbuj kolejno:\n"
+                "  1) pip install --upgrade sentencepiece protobuf transformers tokenizers\n"
                 "  2) usuń cache modelu i pobierz ponownie:\n"
-                "     - Windows:  rmdir /S /Q %USERPROFILE%\\.cache\\huggingface\\hub\\"
-                "models--cardiffnlp--twitter-xlm-roberta-base-sentiment\n"
-                "     - Linux/macOS:  rm -rf ~/.cache/huggingface/hub/"
-                "models--cardiffnlp--twitter-xlm-roberta-base-sentiment\n"
+                "     - Windows:  rmdir /S /Q "
+                f"%USERPROFILE%\\.cache\\huggingface\\hub\\models--{PL_MODEL.replace('/', '--')}\n"
+                "     - Linux/macOS:  rm -rf "
+                f"~/.cache/huggingface/hub/models--{PL_MODEL.replace('/', '--')}\n"
+                f"  3) wymuś inny model, np.:  POLISH_SENTIMENT_MODEL={FALLBACK_MODEL}\n"
                 f"Oryginalny błąd: {exc}"
             ) from exc
         raise
